@@ -5,7 +5,7 @@ import { supabase } from '../../lib/supabase';
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState('messages');
   const [user, setUser] = useState(null);
-  const [profile, setProfile] = useState({ username: '', bio: '', avatar_url: '', role: 'Membre', created_at: '' });
+  const [profile, setProfile] = useState({ username: '', bio: '', avatar_url: '', role: 'Membre' });
   
   // Listes et données
   const [usersList, setUsersList] = useState([]);
@@ -22,16 +22,13 @@ export default function Dashboard() {
   // Modals de création
   const [showCreateGroup, setShowCreateGroup] = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
-  const [selectedMembers, setSelectedMembers] = useState([]);
 
-  // Édition profil
+  // États locaux d'édition isolés pour bloquer les réinitialisations sauvages
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [editUsername, setEditUsername] = useState('');
   const [editBio, setEditBio] = useState('');
 
-  // Statistiques simulées basées sur l'interface cible
   const [stats, setStats] = useState({ sent: 0, received: 0 });
-
   const messagesEndRef = useRef(null);
 
   useEffect(() => {
@@ -44,24 +41,27 @@ export default function Dashboard() {
       }
     });
 
-    // Écoute Realtime globale
-    const dataChannel = supabase.channel('vibenet-pro')
+    // Écoute en Temps Réel stable
+    const dataChannel = supabase.channel('vibenet-pro-stable')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
         setMessages((prev) => [...prev, payload.new]);
-        // Ajuster les stats en temps réel
         if (payload.new.sender_id === user?.id) {
           setStats(s => ({ ...s, sent: s.sent + 1 }));
         } else {
           setStats(s => ({ ...s, received: s.received + 1 }));
         }
       })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, () => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, (payload) => {
+        // Met à jour la liste globale mais n'écrase pas ton formulaire en cours d'édition
         fetchUsers();
+        if (payload.new && user && payload.new.id === user.id && !isEditingProfile) {
+          setProfile(payload.new);
+        }
       })
       .subscribe();
 
     return () => { supabase.removeChannel(dataChannel); };
-  }, [user]);
+  }, [user, isEditingProfile]);
 
   useEffect(() => {
     if (user) {
@@ -86,7 +86,7 @@ export default function Dashboard() {
       const newProf = { 
         id: currentUser.id, 
         username: fallbackName, 
-        bio: '', 
+        bio: 'Hey ! J\'utilise VibeNet.', 
         avatar_url: `https://api.dicebear.com/7.x/initials/svg?seed=${fallbackName}`,
         role: 'Membre',
         status: 'online'
@@ -141,11 +141,12 @@ export default function Dashboard() {
     await supabase.from('messages').insert([msg]);
     setTypedMessage('');
   };
+
   const handleCreateGroupSubmit = async (e) => {
     e.preventDefault();
     if (!newGroupName.trim()) return;
 
-    const { data, error } = await supabase.from('groups').insert([
+    const { data } = await supabase.from('groups').insert([
       { name: newGroupName, created_by: user.id }
     ]).select();
 
@@ -156,18 +157,25 @@ export default function Dashboard() {
     }
   };
 
-  const handleSaveProfile = async () => {
+  const handleSaveProfile = async (e) => {
+    e.preventDefault();
+    if (!editUsername.trim()) return alert('Le pseudo ne peut pas être vide');
+
+    const updatedAvatar = `https://api.dicebear.com/7.x/initials/svg?seed=${editUsername}`;
+
     const { error } = await supabase.from('profiles')
-      .update({ username: editUsername, bio: editBio, avatar_url: `https://api.dicebear.com/7.x/initials/svg?seed=${editUsername}` })
+      .update({ username: editUsername, bio: editBio, avatar_url: updatedAvatar })
       .eq('id', user.id);
 
     if (!error) {
-      setProfile({ ...profile, username: editUsername, bio: editBio, avatar_url: `https://api.dicebear.com/7.x/initials/svg?seed=${editUsername}` });
+      setProfile({ ...profile, username: editUsername, bio: editBio, avatar_url: updatedAvatar });
       setIsEditingProfile(false);
+      alert('Profil enregistré avec succès !');
+    } else {
+      alert('Erreur lors de la sauvegarde : ' + error.message);
     }
   };
 
-  // Filtrer la liste des suggestions selon la recherche du haut
   const filteredUsers = usersList.filter(u => 
     u.id !== user?.id && u.username?.toLowerCase().includes(searchQuery.toLowerCase())
   );
@@ -175,304 +183,193 @@ export default function Dashboard() {
   return (
     <div className="flex flex-col h-screen w-screen bg-[#0f0b26] text-white overflow-hidden font-sans">
       
-      {/* HEADER PRINCIPAL AVEC URL STYLISÉE */}
+      {/* HEADER NETWORKING MESSENGER */}
       <div className="bg-[#8b5cf6] p-3 pt-4 flex items-center justify-between shadow-md">
         <div className="flex items-center gap-2">
-          <button className="text-white">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h7"/></svg>
-          </button>
+          <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse"></div>
           <div>
-            <h1 className="text-sm font-bold tracking-wide uppercase flex items-center gap-1">
-              NETWORK MESSENGER <span className="text-xs">🥋🔴</span>
-            </h1>
-            <p className="text-[10px] text-purple-100 opacity-90">app-ceqvm262kxdt.appmedo.com</p>
+            <h1 className="text-xs font-black tracking-wide uppercase">NETWORK MESSENGER</h1>
+            <p className="text-[9px] text-purple-100 opacity-80">vibenet-premium</p>
           </div>
         </div>
-        <button className="text-white">
-          <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s-.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s-.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>
-        </button>
       </div>
 
-      {/* ZONE CENTRALE DYNAMIQUE (REMPLACE LES ANCIENNES VUES) */}
+      {/* BLOC DE NAVIGATION INTERNE */}
       <div className="flex-1 overflow-y-auto px-4 py-4 pb-24 space-y-6">
         
-        {/* ÉCRAN 1 : MESSAGES ET SUGGESTIONS */}
+        {/* ONGLET MESSAGES */}
         {activeTab === 'messages' && !selectedChat && (
           <div className="space-y-4 animate-fade-in">
             <div className="flex justify-between items-center">
               <h2 className="text-2xl font-black">Messages</h2>
               <div className="flex gap-2">
-                <button onClick={() => setShowCreateGroup(true)} className="w-9 h-9 rounded-full bg-white/5 flex items-center justify-center border border-white/10 text-gray-300">👥</button>
-                <button className="w-9 h-9 rounded-full bg-white/5 flex items-center justify-center border border-white/10 text-gray-300">((o))</button>
-                <button onClick={() => setIsSearching(!isSearching)} className="w-9 h-9 rounded-full bg-[#7c3aed] flex items-center justify-center text-white text-lg font-bold shadow-lg shadow-purple-500/20">+</button>
+                <button onClick={() => setShowCreateGroup(true)} className="w-9 h-9 rounded-full bg-white/5 flex items-center justify-center border border-white/10 text-xs">👥</button>
+                <button onClick={() => setIsSearching(!isSearching)} className="w-9 h-9 rounded-full bg-[#7c3aed] flex items-center justify-center text-white text-lg font-bold">+</button>
               </div>
             </div>
 
-            {/* BARRE DE RECHERCHE DYNAMIQUE (IMAGE 1000055115.jpg) */}
             {isSearching && (
               <div className="relative animate-slide-up">
-                <span className="absolute inset-y-0 left-3 flex items-center text-gray-400 text-xs">🔍</span>
                 <input 
                   type="text" 
-                  placeholder="Rechercher un utilisateur..." 
+                  placeholder="Rechercher un pseudo..." 
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full bg-[#1e1b4b]/60 border border-purple-500/30 rounded-xl py-2.5 pl-9 pr-4 text-xs text-white focus:outline-none focus:border-purple-500"
+                  className="w-full bg-[#161233] border border-purple-500/30 rounded-xl py-2 px-3 text-xs text-white focus:outline-none"
                 />
               </div>
             )}
 
-            {/* SECTIONS SUGGESTIONS (IMAGE 1000055115.jpg) */}
             {searchQuery.length > 0 && (
-              <div className="space-y-2">
-                <span className="text-[10px] font-bold text-gray-400 tracking-wider uppercase">Suggestions</span>
-                <div className="bg-[#161233] border border-white/5 rounded-2xl p-2 space-y-1">
-                  {filteredUsers.map(u => (
-                    <div key={u.id} onClick={() => setSelectedChat({ id: u.id, name: u.username, type: 'private', avatar: u.avatar_url })} className="flex items-center gap-3 p-2.5 hover:bg-white/5 rounded-xl cursor-pointer transition-all">
-                      <img src={u.avatar_url} className="w-9 h-9 rounded-full bg-purple-900/40" alt="" />
-                      <div>
-                        <h4 className="text-xs font-bold text-white flex items-center gap-1">{u.username}</h4>
-                        <p className="text-[10px] text-gray-400 truncate">{u.bio || 'Développeur bla-bla-bla'}</p>
-                      </div>
+              <div className="space-y-1">
+                {filteredUsers.map(u => (
+                  <div key={u.id} onClick={() => setSelectedChat({ id: u.id, name: u.username, type: 'private', avatar: u.avatar_url })} className="flex items-center gap-3 p-2.5 bg-[#161233] rounded-xl cursor-pointer">
+                    <img src={u.avatar_url} className="w-8 h-8 rounded-full" alt="" />
+                    <div>
+                      <h4 className="text-xs font-bold">{u.username}</h4>
+                      <p className="text-[10px] text-gray-400 truncate">{u.bio}</p>
                     </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* ETAT VIDE PAR DÉFAUT (IMAGE 1000055109.jpg) */}
-            {groupsList.length === 0 && searchQuery.length === 0 && (
-              <div className="flex flex-col items-center justify-center py-16 text-center space-y-3">
-                <div className="w-14 h-14 bg-white/5 rounded-full flex items-center justify-center text-gray-400 text-xl">💬</div>
-                <h3 className="text-sm font-bold">Aucune conversation</h3>
-                <p className="text-xs text-gray-400 max-w-xs">Appuyez sur + pour démarrer une discussion ou créer un groupe</p>
-              </div>
-            )}
-
-            {/* AFFICHAGE DES GROUPES EXISTANTS */}
-            {groupsList.length > 0 && searchQuery.length === 0 && (
-              <div className="grid grid-cols-2 gap-3">
-                {groupsList.map(g => (
-                  <div key={g.id} onClick={() => setSelectedChat({ id: g.id, name: g.name, type: 'group' })} className="bg-[#161233] border border-white/5 p-4 rounded-2xl flex flex-col items-center text-center space-y-2 cursor-pointer hover:border-purple-500/40 transition-all">
-                    <div className="w-10 h-10 rounded-full bg-purple-600 flex items-center justify-center font-bold text-xs">👥</div>
-                    <span className="text-xs font-bold truncate w-full">{g.name}</span>
-                    <span className="text-[9px] bg-purple-500/20 text-purple-300 px-2 py-0.5 rounded-full font-semibold">Rejoindre</span>
                   </div>
                 ))}
               </div>
             )}
-          </div>
-        )}
 
-        {/* ÉCRAN 2 : STORIES (IMAGE 1000055111.jpg) */}
-        {activeTab === 'stories' && (
-          <div className="space-y-4 animate-fade-in">
-            <h2 className="text-2xl font-black">Stories</h2>
-            <div className="flex gap-3 overflow-x-auto pb-2">
-              <div className="flex flex-col items-center space-y-1 min-w-[64px]">
-                <div className="relative w-12 h-12 rounded-full border-2 border-dashed border-purple-500 flex items-center justify-center bg-white/5">
-                  <span className="text-xs font-bold text-purple-400">+</span>
+            {groupsList.map(g => (
+              <div key={g.id} onClick={() => setSelectedChat({ id: g.id, name: g.name, type: 'group' })} className="bg-[#161233] p-4 rounded-xl flex justify-between items-center cursor-pointer border border-white/5">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-full bg-purple-600 flex items-center justify-center font-bold text-xs">👥</div>
+                  <span className="text-xs font-bold">{g.name}</span>
                 </div>
-                <span className="text-[10px] text-gray-400">Ajouter</span>
+                <span className="text-[10px] text-purple-400">Ouvrir &gt;</span>
               </div>
-            </div>
-            <div className="bg-[#161233] border border-white/5 p-6 rounded-2xl text-center flex flex-col items-center justify-center space-y-3">
-              <span className="text-2xl">✨</span>
-              <h3 className="text-sm font-bold">Aucune story pour l'instant</h3>
-              <p className="text-xs text-gray-400">Partagez votre moment avec vos contacts</p>
-            </div>
+            ))}
           </div>
         )}
 
-        {/* ÉCRAN 3 : MON PROFIL ET STATS COMPLETS (IMAGES 1000055112, 1000055113, 1000055114) */}
+        {/* ONGLET STORIES */}
+        {activeTab === 'stories' && (
+          <div className="space-y-4 animate-fade-in text-center py-12">
+            <p className="text-xs text-gray-400">Aucune story disponible pour vos contacts actuellement.</p>
+          </div>
+        )}
+
+        {/* ONGLET PROFIL - MODIFICATION SÉCURISÉE DU PSEUDO SANS SAUT DE TEXTE */}
         {activeTab === 'profil' && (
           <div className="space-y-5 animate-fade-in">
-            <div className="flex justify-between items-center">
-              <h2 className="text-2xl font-black">Mon Profil</h2>
-              <button onClick={() => setIsEditingProfile(!isEditingProfile)} className="w-8 h-8 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-xs">✏️</button>
-            </div>
+            <h2 className="text-2xl font-black">Mon Profil</h2>
 
-            {/* AVATAR ET NOM */}
             <div className="flex flex-col items-center text-center space-y-2">
-              <div className="relative w-20 h-20">
-                <img src={profile.avatar_url || `https://api.dicebear.com/7.x/initials/svg?seed=CH`} className="w-full h-full rounded-full border-2 border-purple-500 bg-[#161233]" alt="" />
-                <span className="absolute bottom-0 right-0 w-6 h-6 bg-purple-600 rounded-full border border-[#0f0b26] flex items-center justify-center text-[10px]">📷</span>
-              </div>
-              <h3 className="text-xl font-black tracking-tight">{profile.username || 'chrisst77'}</h3>
+              <img src={profile.avatar_url} className="w-16 h-16 rounded-full border-2 border-purple-500 bg-[#161233]" alt="" />
+              <h3 className="text-lg font-bold">{profile.username}</h3>
+              <p className="text-xs text-gray-400 italic">"{profile.bio || 'Aucune biographie rédigée.'}"</p>
             </div>
 
-            {/* FORMULAIRE DE MODIFICATION SI ACTIF (IMAGE 1000055113.jpg) */}
             {isEditingProfile ? (
-              <div className="bg-[#161233] border border-white/5 p-4 rounded-2xl space-y-3 animate-slide-up">
+              <form onSubmit={handleSaveProfile} className="bg-[#161233] border border-white/5 p-4 rounded-2xl space-y-3">
                 <div>
-                  <label className="text-[10px] uppercase font-bold text-purple-300 block mb-1">Nom d'utilisateur</label>
-                  <input type="text" value={editUsername} onChange={(e) => setEditUsername(e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-xl p-2.5 text-xs text-white focus:outline-none focus:border-purple-500" />
+                  <label className="text-[10px] uppercase font-bold text-purple-300 block mb-1">Changer le Pseudo</label>
+                  <input 
+                    type="text" 
+                    value={editUsername} 
+                    onChange={(e) => setEditUsername(e.target.value)} 
+                    className="w-full bg-black/40 border border-white/10 rounded-xl p-2.5 text-xs text-white focus:outline-none" 
+                  />
                 </div>
                 <div>
-                  <label className="text-[10px] uppercase font-bold text-purple-300 block mb-1">Bio</label>
-                  <textarea value={editBio} onChange={(e) => setEditBio(e.target.value)} placeholder="Parlez un peu de vous..." className="w-full bg-black/40 border border-white/10 rounded-xl p-2.5 text-xs text-white h-20 resize-none focus:outline-none focus:border-purple-500" />
+                  <label className="text-[10px] uppercase font-bold text-purple-300 block mb-1">Changer la Biographie</label>
+                  <input 
+                    type="text" 
+                    value={editBio} 
+                    onChange={(e) => setEditBio(e.target.value)} 
+                    className="w-full bg-black/40 border border-white/10 rounded-xl p-2.5 text-xs text-white focus:outline-none" 
+                  />
                 </div>
                 <div className="flex gap-2">
-                  <button type="button" onClick={() => setIsEditingProfile(false)} className="flex-1 bg-white/5 py-2 rounded-xl text-xs font-bold">Annuler</button>
-                  <button type="button" onClick={handleSaveProfile} className="flex-1 bg-purple-600 py-2 rounded-xl text-xs font-bold shadow-lg shadow-purple-500/20">Sauvegarder</button>
+                  <button type="button" onClick={() => setIsEditingProfile(false)} className="flex-1 bg-white/5 py-2 rounded-xl text-xs">Annuler</button>
+                  <button type="submit" className="flex-1 bg-purple-600 py-2 rounded-xl text-xs font-bold">Enregistrer</button>
                 </div>
-              </div>
+              </form>
             ) : (
-              <div className="bg-[#161233] border border-white/5 rounded-2xl p-4 space-y-3.5 text-xs">
-                <div className="flex justify-between items-center border-b border-white/5 pb-2">
-                  <span className="text-gray-400">Compte</span>
-                  <span className="font-semibold">{user?.email || 'chrisst77@network.app'}</span>
-                </div>
-                <div className="flex justify-between items-center border-b border-white/5 pb-2">
-                  <span className="text-gray-400">Rôle</span>
-                  <span className="bg-purple-500/20 text-purple-300 px-2 py-0.5 rounded-full font-bold text-[10px]">✨ {profile.role || 'Membre'}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-400">Inscrit</span>
-                  <span className="font-semibold text-gray-300">21 juin 2026</span>
-                </div>
-              </div>
+              <button 
+                onClick={() => {
+                  setEditUsername(profile.username);
+                  setEditBio(profile.bio);
+                  setIsEditingProfile(true);
+                }} 
+                className="w-full bg-[#161233] border border-white/5 text-xs font-semibold py-3 rounded-xl text-purple-300"
+              >
+                ✏️ Modifier mes informations (Pseudo / Bio)
+              </button>
             )}
 
-            {/* GRILLE DES STATISTIQUES (IMAGE 1000055112.jpg) */}
-            <div className="space-y-2">
-              <span className="text-[10px] uppercase font-bold text-gray-400 tracking-wider block pl-1">Statistiques</span>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="bg-[#161233] border border-white/5 p-4 rounded-2xl text-center">
-                  <span className="text-2xl font-black block">{stats.sent}</span>
-                  <span className="text-[10px] text-gray-400">Messages envoyés</span>
-                </div>
-                <div className="bg-[#161233] border border-white/5 p-4 rounded-2xl text-center">
-                  <span className="text-2xl font-black block">{stats.received}</span>
-                  <span className="text-[10px] text-gray-400">Messages reçus</span>
-                </div>
+            {/* STATISTIQUES IMMÉDIATES */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="bg-[#161233] p-4 rounded-xl text-center">
+                <span className="text-xl font-bold block">{stats.sent}</span>
+                <span className="text-[9px] text-gray-400">Messages envoyés</span>
               </div>
-            </div>
-
-            {/* ZONE DES BADGES DE VALORISATION (IMAGE 1000055112.jpg) */}
-            <div className="bg-[#161233] border border-white/5 p-4 rounded-2xl space-y-3">
-              <span className="text-[10px] uppercase font-bold text-gray-400 tracking-wider block">Badges</span>
-              <div className="grid grid-cols-3 gap-2 text-center">
-                <div className="p-2 opacity-40"><span className="text-xl block">💬</span><span className="text-[8px] text-gray-400">Premier message</span></div>
-                <div className="p-2 opacity-40"><span className="text-xl block">⚡</span><span className="text-[8px] text-gray-400">Membre actif</span></div>
-                <div className="p-2 opacity-40"><span className="text-xl block">💯</span><span className="text-[8px] text-gray-400">100 messages</span></div>
-              </div>
-              <p className="text-[10px] text-purple-300 text-center italic">Envoie ton premier message pour débloquer des badges !</p>
-            </div>
-
-            {/* RESTE DES OPTIONS COMPLÈTES (IMAGE 1000055114.jpg) */}
-            <div className="space-y-2">
-              <div className="bg-[#161233] border border-white/5 rounded-2xl divide-y divide-white/5 text-xs">
-                <div className="flex items-center justify-between p-3.5 cursor-pointer hover:bg-white/5">
-                  <span className="flex items-center gap-2">👤 Utilisateurs bloqués</span>
-                  <span className="text-gray-500 text-[11px]">0 &gt;</span>
-                </div>
-                <div className="flex items-center justify-between p-3.5 cursor-pointer hover:bg-white/5">
-                  <span className="flex items-center gap-2">🔗 Partager mon profil</span>
-                </div>
-                <div className="flex items-center justify-between p-3.5 cursor-pointer hover:bg-white/5">
-                  <span className="flex items-center gap-2">🏅 Demander la certification</span>
-                </div>
-              </div>
-
-              {/* INTEGRATION DE NETAI (IMAGE 1000055114.jpg) */}
-              <div className="bg-gradient-to-r from-purple-950/40 to-indigo-950/40 border border-purple-500/20 p-3.5 rounded-2xl flex items-center justify-between">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-full bg-purple-600 flex items-center justify-center text-xs">🤖</div>
-                  <div>
-                    <h4 className="text-xs font-bold text-white">Activer Netai ✨</h4>
-                    <p className="text-[9px] text-purple-300">Votre assistant IA sur Network</p>
-                  </div>
-                </div>
-                <span className="bg-purple-600 text-white text-[10px] font-bold px-2.5 py-1 rounded-full shadow">Autorisé</span>
+              <div className="bg-[#161233] p-4 rounded-xl text-center">
+                <span className="text-xl font-bold block">{stats.received}</span>
+                <span className="text-[9px] text-gray-400">Messages reçus</span>
               </div>
             </div>
           </div>
         )}
-
-        {/* ZONE DE CHAT OUVERTE (PLEIN ÉCRAN MOBILE RESPONSIVE) */}
+        {/* CHAT PRIVÉ OU DE GROUPE */}
         {selectedChat && (
-          <div className="fixed inset-0 bg-[#0f0b26] z-40 flex flex-col animate-fade-in">
-            {/* Header du salon privé */}
-            <div className="bg-[#8b5cf6] p-3 pt-4 flex items-center gap-3 shadow-md">
-              <button onClick={() => setSelectedChat(null)} className="text-white font-bold text-sm">⬅️ En arrière</button>
-              <div>
-                <h3 className="text-xs font-bold text-white">{selectedChat.name}</h3>
-                <p className="text-[9px] text-purple-200">Discussion chiffrée en direct</p>
-              </div>
+          <div className="fixed inset-0 bg-[#0f0b26] z-40 flex flex-col">
+            <div className="bg-[#8b5cf6] p-3 pt-4 flex items-center gap-3">
+              <button onClick={() => setSelectedChat(null)} className="text-white text-xs font-bold">⬅️ Retour</button>
+              <h3 className="text-xs font-bold">{selectedChat.name}</h3>
             </div>
 
-            {/* Bulle de messages */}
             <div className="flex-1 p-4 overflow-y-auto space-y-3 bg-black/10">
-              {messages.map((m, i) => {
-                const isMe = m.sender_id === user?.id;
-                return (
-                  <div key={i} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
-                    <span className="text-[9px] text-gray-400 mb-0.5">{m.sender_name}</span>
-                    <div className={`p-3 text-xs rounded-2xl max-w-xs ${isMe ? 'bg-[#7c3aed] text-white rounded-tr-none' : 'bg-white/10 text-gray-100 rounded-tl-none'}`}>
-                      {m.content}
-                    </div>
+              {messages.map((m, i) => (
+                <div key={i} className={`flex flex-col ${m.sender_id === user?.id ? 'items-end' : 'items-start'}`}>
+                  <span className="text-[9px] text-gray-500 mb-0.5">{m.sender_name}</span>
+                  <div className={`p-2.5 text-xs rounded-xl max-w-xs ${m.sender_id === user?.id ? 'bg-[#7c3aed]' : 'bg-white/10'}`}>
+                    {m.content}
                   </div>
-                );
-              })}
+                </div>
+              ))}
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Input d'envoi */}
-            <form onSubmit={handleSendMessage} className="p-3 bg-[#161233] border-t border-white/5 flex gap-2">
-              <input type="text" value={typedMessage} onChange={(e) => setTypedMessage(e.target.value)} placeholder="Écrire un message..." className="flex-1 bg-black/30 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none" />
-              <button type="submit" className="bg-[#7c3aed] text-white font-bold px-4 py-2 rounded-xl text-xs">Envoyer</button>
+            <form onSubmit={handleSendMessage} className="p-3 bg-[#161233] flex gap-2">
+              <input type="text" value={typedMessage} onChange={(e) => setTypedMessage(e.target.value)} placeholder="Votre message..." className="flex-1 bg-black/30 border border-white/10 rounded-xl px-3 py-2 text-xs" />
+              <button type="submit" className="bg-[#7c3aed] px-4 rounded-xl text-xs font-bold">Envoi</button>
             </form>
           </div>
         )}
       </div>
-      {/* POPUP SÉCURISÉ : CRÉATION DE GROUPE INTERFACTIF (IMAGE 1000055116.jpg) */}
+
+      {/* POPUP SÉCURISÉ : CRÉATION DE GROUPE */}
       {showCreateGroup && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex flex-col animate-fade-in text-white">
-          <div className="bg-[#8b5cf6] p-4 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <button type="button" onClick={() => setShowCreateGroup(false)} className="text-sm">⬅️</button>
-              <h2 className="text-sm font-bold">Nouveau groupe</h2>
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <form onSubmit={handleCreateGroupSubmit} className="bg-[#161233] border border-white/10 p-5 rounded-2xl w-full max-w-xs space-y-4">
+            <h3 className="text-xs font-bold uppercase text-purple-300">Nouveau salon</h3>
+            <input type="text" value={newGroupName} onChange={(e) => setNewGroupName(e.target.value)} placeholder="Nom du groupe..." className="w-full bg-black/40 border border-white/10 rounded-xl p-2.5 text-xs text-white focus:outline-none" required />
+            <div className="flex gap-2 text-xs">
+              <button type="button" onClick={() => setShowCreateGroup(false)} className="flex-1 bg-white/5 py-2 rounded-xl">Annuler</button>
+              <button type="submit" className="flex-1 bg-purple-600 py-2 rounded-xl font-bold">Créer</button>
             </div>
-            <button onClick={handleCreateGroupSubmit} className="bg-white/20 text-white font-bold text-xs px-4 py-1.5 rounded-full">Créer</button>
-          </div>
-
-          <div className="p-4 space-y-6 flex-1 overflow-y-auto">
-            <div className="flex items-center gap-4 border-b border-white/5 pb-4">
-              <div className="w-16 h-16 rounded-full border-2 border-dashed border-purple-400 flex items-center justify-center bg-white/5 text-xl cursor-pointer">📷</div>
-              <div className="flex-1">
-                <label className="text-[10px] uppercase font-bold text-purple-300 block mb-1">Nom du groupe</label>
-                <input type="text" value={newGroupName} onChange={(e) => setNewGroupName(e.target.value)} placeholder="Ex: Les amis, Famille..." className="w-full bg-[#161233] border border-white/10 rounded-xl p-2.5 text-xs text-white focus:outline-none" />
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-[10px] uppercase font-bold text-gray-400 tracking-wider block">Ajouter des membres</label>
-              <div className="relative">
-                <span className="absolute inset-y-0 left-3 flex items-center text-gray-400 text-xs">🔍</span>
-                <input type="text" placeholder="Rechercher un utilisateur..." className="w-full bg-[#161233] border border-white/10 rounded-xl py-2 pl-9 text-xs" />
-              </div>
-            </div>
-          </div>
+          </form>
         </div>
       )}
 
-      {/* BARRE DE NAVIGATION INFÉRIEURE FIXE (PRÉSENTE SUR TOUTES LES IMAGES) */}
-      <div className="fixed bottom-0 left-0 right-0 bg-[#f4f4f5] border-t border-gray-200 py-2.5 flex justify-around items-center z-30 rounded-t-3xl shadow-xl">
-        <button onClick={() => { setActiveTab('messages'); setSelectedChat(null); }} className={`flex flex-col items-center gap-1 flex-1 text-center ${activeTab === 'messages' ? 'text-[#7c3aed]' : 'text-gray-400'}`}>
-          <span className="text-lg">💬</span>
-          <span className="text-[10px] font-bold">Messages</span>
+      {/* BARRE DE NAVIGATION INFÉRIEURE */}
+      <div className="fixed bottom-0 left-0 right-0 bg-[#f4f4f5] border-t border-gray-200 py-2.5 flex justify-around items-center z-30 rounded-t-2xl shadow-xl">
+        <button onClick={() => { setActiveTab('messages'); setSelectedChat(null); }} className={`flex flex-col items-center gap-0.5 flex-1 ${activeTab === 'messages' ? 'text-[#7c3aed]' : 'text-gray-400'}`}>
+          <span className="text-base">💬</span><span className="text-[9px] font-bold">Messages</span>
         </button>
-        <button onClick={() => { setActiveTab('stories'); setSelectedChat(null); }} className={`flex flex-col items-center gap-1 flex-1 text-center ${activeTab === 'stories' ? 'text-[#7c3aed]' : 'text-gray-400'}`}>
-          <span className="text-lg">📺</span>
-          <span className="text-[10px] font-bold">Stories</span>
+        <button onClick={() => { setActiveTab('stories'); setSelectedChat(null); }} className={`flex flex-col items-center gap-0.5 flex-1 ${activeTab === 'stories' ? 'text-[#7c3aed]' : 'text-gray-400'}`}>
+          <span className="text-base">📺</span><span className="text-[9px] font-bold">Stories</span>
         </button>
-        <button onClick={() => { setActiveTab('profil'); setSelectedChat(null); }} className={`flex flex-col items-center gap-1 flex-1 text-center ${activeTab === 'profil' ? 'text-[#7c3aed]' : 'text-gray-400'}`}>
-          <span className="text-lg">👤</span>
-          <span className="text-[10px] font-bold">Profil</span>
+        <button onClick={() => { setActiveTab('profil'); setSelectedChat(null); }} className={`flex flex-col items-center gap-0.5 flex-1 ${activeTab === 'profil' ? 'text-[#7c3aed]' : 'text-gray-400'}`}>
+          <span className="text-base">👤</span><span className="text-[9px] font-bold">Profil</span>
         </button>
       </div>
 
     </div>
   );
-              }
+        }
